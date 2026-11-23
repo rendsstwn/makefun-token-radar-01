@@ -136,7 +136,10 @@ tbody tr[data-selected="true"] { background: rgba(47, 211, 154, 0.09); }
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-4); }
 .model h2 { margin-bottom: -var(--step-2); }
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); }
-.model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--step-4); }
+.model-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--step-4); }
+/* The validation table has five columns: it takes the full row, so it never prints over
+   the column beside it. */
+.valid-full { grid-column: 1 / -1; }
 .model h3 { margin-bottom: var(--step-2); }
 .mini-table { width: 100%; font-size: 13px; }
 .mini-table td, .mini-table th { padding: 6px 8px; }
