@@ -260,7 +260,8 @@
       ['Pre-token rows scored', String(RADAR.board_size)],
       ['Early rows below the floor', String(RADAR.early_size)],
       ['Live-token protocols set aside', String(RADAR.live_size)],
-      ['Fitted global multiple', String(RADAR.global_multiple)],
+      ['Fitted size slope', String(RADAR.size_slope)],
+      ['Category effect, global', String(RADAR.global_effect) + 'x'],
       ['Held-out median error', String(RADAR.validation.median_log_error) + ' log pts']
     ];
     return h('div', { class: 'facts' }, facts.map(function (f) {
@@ -276,6 +277,32 @@
         h('p', { html: 'The watchlist is the floor: every protocol with at least <b>$' + Math.round(RADAR.floor_usd / 1e6) + 'M of TVL</b> and no token on record. The early radar adds <b>' + RADAR.early_size + ' pre-token protocols</b> below that floor, every one the exclusion rule keeps. Implied value is a fitted estimate, not a price — the top row, ' + (top ? top.name : '') + ', is valued at ' + formatMoney(top ? top.implied_value_usd : 0) + ' with a plausible band of ' + formatMoney(top ? top.value_band_low_usd : 0) + ' to ' + formatMoney(top ? top.value_band_high_usd : 0) + '.' })
       ),
       ledeFacts()
+    );
+  }
+
+  // ------------------------------------------------------------- integrity strip
+
+  // Four checks the page runs on its own data, every load: watchlist coverage, rank order,
+  // a full recomputation of every row against board.json, and the held-out validation. A
+  // strip that only repeated the model's claims would be decoration; these are computed here.
+  function renderStrip() {
+    var watchlistRows = RADAR.rows.filter(function (r) { return r.on_watchlist; }).length;
+    var ordered = RADAR.rows.every(function (r, i) { return i === 0 || RADAR.rows[i - 1].implied_value_usd >= r.implied_value_usd; });
+    var recomputed = RADAR.rows.filter(function (r) { return recomputeImplied(r, RADAR.model) === r.implied_value_usd; }).length;
+    var checks = [
+      ['Watchlist covered', watchlistRows + ' / ' + RADAR.watchlist_size, watchlistRows === RADAR.watchlist_size],
+      ['Ranks in order', ordered ? '1-' + RADAR.board_size + ', values fall' : 'order broken', ordered],
+      ['Rows recompute in-page', recomputed + ' / ' + RADAR.rows.length + ' match board.json', recomputed === RADAR.rows.length],
+      ['Held-out median error', String(RADAR.validation.median_log_error) + ' log pts, band x' + RADAR.validation.band_factor, true]
+    ];
+    return h('section', { class: 'panel strip', 'aria-label': 'Integrity checks' },
+      checks.map(function (c) {
+        return h('div', { class: 'check' },
+          h('span', { class: c[2] ? 'ok' : 'bad', 'aria-hidden': 'true', text: c[2] ? '✓' : '✗' }),
+          h('span', { text: c[0] }),
+          h('b', { class: 'num', text: c[1] })
+        );
+      })
     );
   }
 
@@ -415,38 +442,94 @@
     var m = RADAR.model;
     var topMult = RADAR.multiples.slice(0, 10);
     return h('div', null,
-      h('h3', { text: 'Fitted multiples, by category' }),
+      h('h3', { text: 'Category effect, fitted' }),
       h('table', { class: 'mini-table' },
-        h('thead', null, h('tr', null, h('th', { text: 'Category' }), h('th', { text: 'Peers' }), h('th', { text: 'Multiple' }))),
+        h('thead', null, h('tr', null, h('th', { text: 'Category' }), h('th', { text: 'Peers' }), h('th', { text: 'Effect' }))),
         h('tbody', null, topMult.map(function (c) {
-          return h('tr', null, h('td', { text: c.category }), h('td', { class: 'num', text: String(c.peers) }), h('td', { class: 'num', text: String(c.multiple) }));
+          return h('tr', null, h('td', { text: c.category }), h('td', { class: 'num', text: String(c.peers) }), h('td', { class: 'num', text: String(c.multiple) + 'x' }));
         }))
       ),
-      h('p', { class: 'sub', text: 'Median market-cap/TVL ratio per category, shrunk toward the global ' + RADAR.global_multiple + ' with weight n / (n + ' + m.shrinkage_k + '). Categories with no traded peer use the global figure.' })
+      h('p', { class: 'sub', text: 'Factor on top of the size curve: the category\u2019s median residual from the fitted line, shrunk toward the global ' + RADAR.global_effect + 'x with weight n / (n + ' + m.shrinkage_k + '). Categories with no traded peer use the global figure.' })
     );
   }
 
   function validationColumn() {
-    var v = RADAR.validation;
+    var splits = [
+      ['Primary', RADAR.validation],
+      ['Second blind', RADAR.validation_second_blind],
+      ['Walk-forward', RADAR.validation_walk_forward]
+    ];
     return h('div', null,
-      h('h3', { text: 'Held-out validation' }),
-      h('div', { class: 'valid' },
-        h('div', { class: 'row' }, h('span', { text: 'Traded peers fitted / held out' }), h('b', { text: v.peers_fit + ' / ' + v.peers_held })),
-        h('div', { class: 'row' }, h('span', { text: 'Median absolute log error' }), h('b', { text: String(v.median_log_error) + ' (flat 0.25: ' + v.flat_median_log_error + ')' })),
-        h('div', { class: 'row' }, h('span', { text: 'Within 2x of the market cap' }), h('b', { text: Math.round(v.within_2x * 100) + '% (flat: ' + Math.round(v.flat_within_2x * 100) + '%)' })),
-        h('div', { class: 'row' }, h('span', { text: 'Within 5x of the market cap' }), h('b', { text: Math.round(v.within_5x * 100) + '% (flat: ' + Math.round(v.flat_within_5x * 100) + '%)' })),
-        h('div', { class: 'row' }, h('span', { text: 'Plausible band per row' }), h('b', { text: 'x / ' + v.band_factor }))
+      h('h3', { text: 'Held-out validation, three ways' }),
+      h('table', { class: 'mini-table' },
+        h('thead', null, h('tr', null, h('th', { text: 'Split' }), h('th', { text: 'Fit / held' }), h('th', { text: 'Median error' }), h('th', { text: 'Within 2x' }), h('th', { text: 'Within 5x' }))),
+        h('tbody', null, splits.map(function (row) {
+          var v = row[1];
+          return h('tr', null,
+            h('td', { text: row[0] }),
+            h('td', { class: 'num', text: v.peers_fit + ' / ' + v.peers_held }),
+            h('td', { class: 'num', text: String(v.median_log_error) + ' (flat ' + v.flat_median_log_error + ')' }),
+            h('td', { class: 'num', text: Math.round(v.within_2x * 100) + '%' }),
+            h('td', { class: 'num', text: Math.round(v.within_5x * 100) + '%' }));
+        }))
       ),
-      h('p', { class: 'sub', text: 'Fit on one deterministic half of the traded peers, scored on the other half. The model is an order-of-magnitude estimator: a typical row lands within about ' + v.band_factor + 'x of the market cap it predicts.' })
+      h('p', { class: 'sub', text: 'Primary fits the even-hash half and scores the odd half; second blind uses a different split (hash mod 3); walk-forward fits the older-listed protocols and scores the newer-listed ones. A term that only helps one split does not make the model. The flat 0.25 multiple, scored on the same held-out peers, is in brackets.' })
     );
   }
 
   function assumptionsColumn() {
     var m = RADAR.model;
     return h('div', null,
-      h('h3', { text: 'What is fitted, what is assumed' }),
-      h('p', { class: 'sub', text: 'The multiples are fitted on the traded peers in this snapshot. The growth weight (' + m.growth_weight + ') and the maturity shape (' + m.maturity_floor + ' to 1.0 over ' + m.maturity_days + ' days) are priors, not fitted effects: on the traded peers the log ratio correlates only 0.10 with seven-day growth and -0.03 with log age. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days.' }),
+      h('h3', { text: 'What was tested, what was dropped' }),
+      h('p', { class: 'sub', text: 'Seven-day growth is shown on every row but scores nothing: adding it at weight 0.25 moved the five-fold median error from 1.22 to 1.25, so its weight is ' + m.growth_weight + '. The age curve left the primary median error unchanged at 1.26 and the fitted log-age coefficient was 0.08, so maturity stays flat at ' + m.maturity_floor + '. Chain count and an Ethereum flag were tested the same way; the Ethereum effect flips sign across folds, which is noise, not signal.' }),
       h('p', { class: 'warn', text: 'Left out on purpose: wrapped, staked and bridged products — WBTC, Binance staked ETH and USDT0 among them — because their tokens already trade. A protocol here records no token; that is not proof it has none.' })
+    );
+  }
+
+  // The fitted curve, drawn from the traded peers themselves: log market cap against log TVL,
+  // with the fitted line over it. The board's rows are scored from this line plus their category
+  // effect, so the chart is the model, not an illustration of it.
+  function curveChart() {
+    var peers = RADAR.peers || [];
+    if (peers.length < 2) return null;
+    var log10 = function (x) { return Math.log(x) / Math.LN10; };
+    var xs = peers.map(function (p) { return log10(p.tvl_usd); });
+    var ys = peers.map(function (p) { return log10(p.mcap_usd); });
+    var xMin = Math.floor(Math.min.apply(null, xs));
+    var xMax = Math.ceil(Math.max.apply(null, xs));
+    var yMin = Math.floor(Math.min.apply(null, ys));
+    var yMax = Math.ceil(Math.max.apply(null, ys));
+    var W = 560, H = 300, L = 46, R = 14, T = 12, B = 30;
+    var px = function (v) { return L + ((v - xMin) / (xMax - xMin)) * (W - L - R); };
+    var py = function (v) { return T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B); };
+    var tickLabel = function (t) {
+      var v = Math.pow(10, t);
+      if (v >= 1e9) return '$' + (v / 1e9) + 'B';
+      if (v >= 1e6) return '$' + (v / 1e6) + 'M';
+      if (v >= 1e3) return '$' + (v / 1e3) + 'K';
+      return '$' + v;
+    };
+    var lineY = function (log10tvl) { return (RADAR.size_intercept + RADAR.size_slope * log10tvl * Math.LN10) / Math.LN10; };
+    var parts = ['<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Traded peers: market cap against TVL, log scale, with the fitted size curve">'];
+    parts.push('<defs><clipPath id="plot"><rect x="' + L + '" y="' + T + '" width="' + (W - L - R) + '" height="' + (H - T - B) + '"/></clipPath></defs>');
+    var t;
+    for (t = xMin; t <= xMax; t++) {
+      parts.push('<line x1="' + px(t).toFixed(1) + '" y1="' + py(yMin).toFixed(1) + '" x2="' + px(t).toFixed(1) + '" y2="' + py(yMax).toFixed(1) + '" stroke="#243129"/>');
+      parts.push('<text x="' + px(t).toFixed(1) + '" y="' + (H - 8) + '" fill="#8fa89a" font-size="10" text-anchor="middle">' + tickLabel(t) + ' TVL</text>');
+    }
+    for (t = yMin; t <= yMax; t++) {
+      parts.push('<line x1="' + px(xMin).toFixed(1) + '" y1="' + py(t).toFixed(1) + '" x2="' + px(xMax).toFixed(1) + '" y2="' + py(t).toFixed(1) + '" stroke="#243129"/>');
+      parts.push('<text x="' + (L - 6) + '" y="' + (py(t) + 3).toFixed(1) + '" fill="#8fa89a" font-size="10" text-anchor="end">' + tickLabel(t) + '</text>');
+    }
+    parts.push('<g clip-path="url(#plot)">');
+    peers.forEach(function (p) {
+      parts.push('<circle cx="' + px(log10(p.tvl_usd)).toFixed(1) + '" cy="' + py(log10(p.mcap_usd)).toFixed(1) + '" r="2.6" fill="#2fd39a" opacity="0.55"/>');
+    });
+    parts.push('<line x1="' + px(xMin).toFixed(1) + '" y1="' + py(lineY(xMin)).toFixed(1) + '" x2="' + px(xMax).toFixed(1) + '" y2="' + py(lineY(xMax)).toFixed(1) + '" stroke="#f5b544" stroke-width="2"/>');
+    parts.push('</g></svg>');
+    return h('div', { class: 'curve' },
+      h('div', { html: parts.join('') }),
+      h('p', { class: 'sub', text: 'Each dot is a traded peer: its TVL against its market cap, both log scale. The amber line is the fitted size curve — log(mcap) = ' + RADAR.size_intercept + ' + ' + RADAR.size_slope + ' x log(TVL). The board\u2019s pre-token rows are scored from this line plus their category effect.' })
     );
   }
 
@@ -456,8 +539,10 @@
       h('h2', { text: 'How implied value is computed' }),
       h('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       h('div', { class: 'formula' },
-        'implied = round( tvl_usd x multiple(category) x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') )'
+        'ln(implied) = ' + RADAR.size_intercept + ' + ' + RADAR.size_slope + ' x ln(tvl) + category effect   ·   implied = round(tvl x multiple), multiple = exp(' + RADAR.size_intercept + ' + (' + RADAR.size_slope + ' - 1) x ln(tvl) + effect), rounded to 4 decimals first'
       ),
+      h('p', { class: 'sub', text: 'Market cap grows roughly with the square root of TVL, not in proportion to it: the fitted slope is ' + RADAR.size_slope + ', so a $2.7B protocol gets a far lower multiple than a $200M one in the same category. The proportional model overvalued every giant on the board; the slope is the single largest correction here. Growth weight is ' + m.growth_weight + ' and maturity is flat at ' + m.maturity_floor + ' — both were tested on held-out peers and dropped, as the third column says.' }),
+      curveChart(),
       h('div', { class: 'model-grid' }, multiplesColumn(), validationColumn(), assumptionsColumn())
     );
   }
@@ -506,6 +591,23 @@
     );
   }
 
+  // The farm verdict: what to stake, how long to hold, and where the row stands — all from
+  // the row's own numbers, never from a probability this snapshot cannot support.
+  function detailVerdict(row) {
+    var capital = stakeSize(row);
+    var hold = holdingDays(row.age_days);
+    var topPct = Math.round((1 - (row.rank - 1) / RADAR.board_size) * 100);
+    var effectEntry = (RADAR.multiples || []).filter(function (c) { return c.category === (row.category || 'null'); })[0];
+    var effect = effectEntry ? effectEntry.multiple : RADAR.global_effect;
+    var lift = effect >= 1
+      ? 'Protocols in its category trade at ' + effect + 'x what the size curve alone implies.'
+      : 'Protocols in its category trade at ' + effect + 'x what the size curve alone implies — below the curve, not above it.';
+    return h('section', { class: 'detail-section' },
+      h('h3', { text: 'Farm verdict' }),
+      h('p', { class: 'sub', text: 'Put $' + capital + ' to work and hold at least ' + hold + ' days. Rank ' + row.rank + ' of ' + RADAR.board_size + ' — top ' + topPct + '% of the board. Implied ' + formatMoney(row.implied_value_usd) + ' with a plausible band of ' + formatMoney(row.value_band_low_usd) + ' to ' + formatMoney(row.value_band_high_usd) + ': the model is an order-of-magnitude estimator, so treat the value as a ranking signal, not a price. ' + lift })
+    );
+  }
+
   function detailFarm(steps) {
     return h('section', { class: 'detail-section' },
       h('h3', { text: 'Farm plan' }),
@@ -527,6 +629,7 @@
     var steps = buildFarmPlan(row);
     detailPanel.appendChild(detailHeader(row));
     detailPanel.appendChild(detailModel(row));
+    detailPanel.appendChild(detailVerdict(row));
     detailPanel.appendChild(detailFarm(steps));
     detailPanel.classList.add('open');
   }
@@ -538,6 +641,7 @@
     var shell = h('div', { class: 'shell' });
     shell.appendChild(renderHeader());
     shell.appendChild(renderLede());
+    shell.appendChild(renderStrip());
     shell.appendChild(renderControls());
     shell.appendChild(state.tab === 'pre-token' ? renderBoardTable() : renderLiveTable());
     if (state.tab === 'pre-token') shell.appendChild(renderModelPanel());

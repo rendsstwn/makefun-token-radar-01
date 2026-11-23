@@ -107,6 +107,16 @@ tbody tr[data-selected="true"] { background: rgba(47, 211, 154, 0.09); }
 .status.live::before { background: var(--amber); }
 .tag { display: inline-block; font-size: 11px; font-family: var(--font-num); color: var(--amber); border: 1px solid rgba(245, 181, 68, 0.4); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
 
+.strip { margin-top: var(--step-4); padding: var(--step-3) var(--step-4); display: flex; flex-wrap: wrap; gap: var(--step-3) var(--step-5); }
+.check { display: flex; align-items: baseline; gap: var(--step-2); font-size: 13px; }
+.check span:first-child { font-weight: 700; }
+.check .ok { color: var(--accent); }
+.check .bad { color: var(--negative); }
+.check span:nth-child(2) { color: var(--muted); }
+.check b { font-weight: 500; }
+.curve { background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); }
+.curve p { margin-top: var(--step-2); }
+
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-4); }
 .model h2 { margin-bottom: -var(--step-2); }
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3) var(--step-4); }
