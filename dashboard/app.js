@@ -236,7 +236,8 @@
       h('div', { class: 'bar', 'aria-hidden': 'true' }, h('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
       h('span', null,
         h('span', { class: 'num', text: formatMoney(r.implied_value_usd) }),
-        h('span', { class: 'band', text: formatMoney(r.value_band_low_usd) + ' - ' + formatMoney(r.value_band_high_usd) })
+        h('span', { class: 'band', text: formatMoney(r.value_band_low_usd) + ' - ' + formatMoney(r.value_band_high_usd) }),
+        h('span', { class: 'band', text: 'multiple ' + r.multiple + 'x' })
       )
     ));
   }
@@ -303,6 +304,58 @@
           h('b', { class: 'num', text: c[1] })
         );
       })
+    );
+  }
+
+  // ------------------------------------------------------------- the top-three spotlight
+
+  // The three launches to watch, on the first screen: each card says why its row sits
+  // where it does — its TVL rank on the board, the multiple the size curve gives it, and
+  // whether its category trades above or below the curve. Every number is computed here
+  // from the row and the fitted model, never asserted.
+  function tvlRank(row) {
+    var n = 0;
+    RADAR.rows.forEach(function (r) { if (r.tvl_usd > row.tvl_usd) n++; });
+    return n + 1;
+  }
+
+  function categoryMultiple(row) {
+    var entry = (RADAR.multiples || []).filter(function (c) { return c.category === (row.category || 'null'); })[0];
+    return entry ? entry.multiple : RADAR.global_effect;
+  }
+
+  function spotlightCard(row) {
+    var catMult = categoryMultiple(row);
+    var lift = catMult >= RADAR.global_effect
+      ? 'Its category trades at ' + catMult + 'x the size curve.'
+      : 'Its category trades at ' + catMult + 'x the size curve — below the curve, not above it.';
+    return h('article', {
+      class: 'spot-card', tabindex: '0', role: 'button',
+      'aria-label': 'Rank ' + row.rank + ': ' + row.name + ', implied ' + formatMoney(row.implied_value_usd),
+      onclick: function () { showDetail(row.slug); },
+      onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showDetail(row.slug); } }
+    },
+      h('div', { class: 'spot-head' },
+        h('span', { class: 'spot-rank', text: '#' + row.rank }),
+        h('span', { class: 'tag', text: row.on_watchlist ? 'watchlist' : 'early' })
+      ),
+      h('h3', { text: row.name }),
+      h('p', { class: 'sub', text: (row.category || 'Other') + ' on ' + (row.chains && row.chains.length ? row.chains.slice(0, 2).join(', ') : 'an unnamed chain') }),
+      h('div', { class: 'spot-value num', text: formatMoney(row.implied_value_usd) }),
+      h('p', { class: 'sub', text: 'TVL ' + formatMoney(row.tvl_usd) + ' (rank ' + tvlRank(row) + ' of ' + RADAR.board_size + ') × multiple ' + row.multiple + '.' }),
+      h('p', { class: 'sub', text: lift + ' Plausible band ' + formatMoney(row.value_band_low_usd) + ' – ' + formatMoney(row.value_band_high_usd) + '.' })
+    );
+  }
+
+  function renderSpotlight() {
+    var top = RADAR.rows.slice(0, 3);
+    if (top.length === 0) return null;
+    return h('section', { class: 'spotlight', 'aria-label': 'The three launches to watch' },
+      h('div', { class: 'spot-title' },
+        h('h2', { text: 'The three launches to watch' }),
+        h('p', { class: 'sub', text: 'The three highest implied values on the board. Each card says why its row sits there — TVL, multiple and category lift — and opens the full model and farm plan.' })
+      ),
+      h('div', { class: 'spot-grid' }, top.map(spotlightCard))
     );
   }
 
@@ -482,6 +535,7 @@
     return h('div', null,
       h('h3', { text: 'What was tested, what was dropped' }),
       h('p', { class: 'sub', text: 'Seven-day growth is shown on every row but scores nothing: adding it at weight 0.25 moved the five-fold median error from 1.22 to 1.25, so its weight is ' + m.growth_weight + '. The age curve left the primary median error unchanged at 1.26 and the fitted log-age coefficient was 0.08, so maturity stays flat at ' + m.maturity_floor + '. Chain count and an Ethereum flag were tested the same way; the Ethereum effect flips sign across folds, which is noise, not signal.' }),
+      h('p', { class: 'sub', text: 'radar-4 re-tested the model against 37 variants on the same four held-out splits — age shrinkage for young protocols, a fitted log-age term, size-band category effects, a trimmed-mean effect, per-category slopes, a fitted chains term, capped and positive-only growth, and a residual regression on age, chains and growth — and then re-tested the best-looking ones on 20 seeded random 50/50 splits. None of them beat radar-3 on even half the seeds: the apparent gains were selection noise. The wide within-category spread survived every attack, so the model keeps radar-3\u2019s formula and says so, instead of dressing a noise-chased tweak up as an improvement.' }),
       h('p', { class: 'warn', text: 'Left out on purpose: wrapped, staked and bridged products — WBTC, Binance staked ETH and USDT0 among them — because their tokens already trade. A protocol here records no token; that is not proof it has none.' })
     );
   }
@@ -641,6 +695,7 @@
     var shell = h('div', { class: 'shell' });
     shell.appendChild(renderHeader());
     shell.appendChild(renderLede());
+    shell.appendChild(renderSpotlight());
     shell.appendChild(renderStrip());
     shell.appendChild(renderControls());
     shell.appendChild(state.tab === 'pre-token' ? renderBoardTable() : renderLiveTable());

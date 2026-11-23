@@ -107,6 +107,22 @@ tbody tr[data-selected="true"] { background: rgba(47, 211, 154, 0.09); }
 .status.live::before { background: var(--amber); }
 .tag { display: inline-block; font-size: 11px; font-family: var(--font-num); color: var(--amber); border: 1px solid rgba(245, 181, 68, 0.4); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
 
+.spotlight { margin-top: var(--step-4); }
+.spot-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--step-2) var(--step-4); margin-bottom: var(--step-3); }
+.spot-title h2 { font-size: 18px; }
+.spot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--step-3); }
+.spot-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel);
+  padding: var(--step-4); display: grid; gap: var(--step-2); cursor: pointer; align-content: start;
+}
+.spot-card:hover { border-color: var(--accent-dim); }
+.spot-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.spot-head { display: flex; align-items: center; justify-content: space-between; gap: var(--step-2); }
+.spot-rank { font-family: var(--font-num); font-size: 20px; font-weight: 700; color: var(--accent); }
+.spot-card h3 { font-size: 17px; }
+.spot-value { font-size: 22px; font-weight: 650; color: var(--accent); }
+.spot-card .sub { line-height: 1.45; }
+
 .strip { margin-top: var(--step-4); padding: var(--step-3) var(--step-4); display: flex; flex-wrap: wrap; gap: var(--step-3) var(--step-5); }
 .check { display: flex; align-items: baseline; gap: var(--step-2); font-size: 13px; }
 .check span:first-child { font-weight: 700; }
