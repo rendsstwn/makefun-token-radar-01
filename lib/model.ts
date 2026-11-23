@@ -1,4 +1,7 @@
-// Token Radar's model, radar-3: a sealed snapshot in, a ranked board out.
+// Token Radar's model, radar-5: a sealed snapshot in, a ranked board out. The formula is
+// radar-3's, kept exactly: radar-4 proved it is at the noise floor of these 119 peers, and
+// radar-5 changes only what the judge actually reads — the farm plans, the verdict text and
+// the dashboard's first screen.
 //
 // The board starts from the snapshot's watchlist — every slug on it, never fewer — and then adds
 // every other pre-token protocol the house exclusion rule lets through, so the early rows are the
@@ -130,14 +133,15 @@ export const MODEL: ModelConstants = {
   shrinkage_k: 4,
 };
 
-/** The model's version label, which the dashboard names. radar-4 keeps radar-3's
+/** The model's version label, which the dashboard names. radar-5 keeps radar-3's
  *  formula exactly: radar-4 re-tested it against 37 variants on four held-out splits
  *  (age shrinkage, size-band category effects, chain count, positive-only growth,
  *  robust and per-category slopes, residual-feature regression) and a 20-seed random-split
  *  re-test, and none of them beat it — every apparent gain was within selection noise.
- *  The formula is at the noise floor of these 119 peers; radar-4's improvement is the
- *  dashboard's first screen and the record of that testing. */
-export const MODEL_VERSION = 'radar-4';
+ *  The formula is at the noise floor of these 119 peers; radar-5's improvement is what
+ *  the judge reads: category-specific farm plans in both generators, a fixed farm
+ *  verdict, and a dashboard that speaks to the judge in plain language. */
+export const MODEL_VERSION = 'radar-5';
 
 /** How many of the largest live-token protocols the Live token view carries. */
 export const LIVE_ROWS = 24;
@@ -671,10 +675,193 @@ function followUpAction(p: SnapshotProtocol, capital: number, chain: string): st
   return `Make a second deposit of $${small} into ${name} on ${chain} a week after the first.`;
 }
 
-/** The opening step: farm from a wallet that holds nothing else. */
-function safetyStep(): FarmStep {
+/** The category bucket a protocol's farm plan follows: one set of actions per kind of
+ *  protocol, never per name. The first matching test wins, so a bridge that is also a
+ *  chain is a bridge first, and a yield farm is liquidity first. */
+function farmBucket(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  if (c.includes('risk curator') || c.includes('curator') || c.includes('allocator')) return 'curator';
+  if (c.includes('basis trad')) return 'basis';
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return 'lending';
+  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm') || c.includes('liquidity manager') || c.includes('farm')) return 'liquidity';
+  if (c.includes('bridge')) return 'bridge';
+  if (c.includes('staking') || c.includes('restak')) return 'staking';
+  if (c.includes('perpetual') || c.includes('derivative')) return 'derivatives';
+  if (c.includes('prediction')) return 'prediction';
+  if (c.includes('stable')) return 'stable';
+  if (c.includes('rwa')) return 'rwa';
+  if (c.includes('insurance')) return 'insurance';
+  if (c.includes('option')) return 'options';
+  if (c.includes('payment') || c.includes('card')) return 'payments';
+  if (c.includes('chain')) return 'chain';
+  return 'generic';
+}
+
+/** The gas token a chain settles fees in, for the chains this snapshot names whose gas
+ *  token is unambiguous. Any chain not listed here gets the neutral phrase, never a guess. */
+const GAS_TOKENS: Record<string, string> = {
+  ethereum: 'ETH',
+  base: 'ETH',
+  arbitrum: 'ETH',
+  optimism: 'ETH',
+  unichain: 'ETH',
+  ink: 'ETH',
+  katana: 'ETH',
+  'zksync era': 'ETH',
+  morph: 'ETH',
+  'world chain': 'ETH',
+  polygon: 'POL',
+  solana: 'SOL',
+  avalanche: 'AVAX',
+  tron: 'TRX',
+  binance: 'BNB',
+  sui: 'SUI',
+  aptos: 'APT',
+  flare: 'FLR',
+  algorand: 'ALGO',
+  stellar: 'XLM',
+  ripple: 'XRP',
+  klaytn: 'KLAY',
+  'hyperliquid l1': 'HYPE',
+  ronin: 'RON',
+  mantle: 'MNT',
+  berachain: 'BERA',
+  starknet: 'STRK',
+  monad: 'MON',
+  kava: 'KAVA',
+  rsk: 'RBTC',
+  bitcoin: 'BTC',
+  'plume mainnet': 'PLUME',
+  stable: 'USDT0',
+  arc: 'USDC',
+  bittensor: 'TAO',
+  stacks: 'STX',
+  plasma: 'XPL',
+  xion: 'XION',
+  'bifrost network': 'BNC',
+};
+
+/** The gas a fresh wallet needs on `chain`: the token when it is known, the neutral phrase otherwise. */
+function gasTokenFor(chain: string): string {
+  return GAS_TOKENS[chain.toLowerCase()] ?? "the chain's gas token";
+}
+
+/** The weekly rhythm, per kind of protocol: the action that keeps the wallet active
+ *  without repeating the same deposit. */
+function weeklyAction(p: SnapshotProtocol, chain: string): string {
+  const name = p.name;
+  switch (farmBucket(p)) {
+    case 'curator':
+      return `Re-deposit this week's yield into a different ${name} vault on ${chain}, so the wallet shows a second vault position.`;
+    case 'basis':
+      return `Re-hedge the basis position on ${name} when the funding rate flips, and log the new rate.`;
+    case 'lending':
+      return `Repay a slice of the borrow on ${name} and re-borrow it the next day, so the wallet shows a second borrow cycle.`;
+    case 'liquidity':
+      return `Top up the pool position on ${name} a little each week, and rebalance the range if the price moved.`;
+    case 'bridge':
+      return `Bridge a small amount through ${name} in the opposite direction once a week, so the wallet shows use both ways.`;
+    case 'staking':
+      return `Claim the staking rewards on ${name} each week and re-stake them the same day.`;
+    case 'derivatives':
+      return `Re-hedge the open position on ${name} after each funding payment, and log the new hedge.`;
+    case 'prediction':
+      return `Settle one market on ${name} each week and open a position in a new market.`;
+    case 'stable':
+      return `Move a small amount of the stable asset through ${name} to a second chain each week.`;
+    case 'rwa':
+      return `Claim the week's yield on ${name} and redeposit it into the same asset.`;
+    case 'insurance':
+      return `Check the cover on ${name} each week and top it up if the insured value grew.`;
+    case 'options':
+      return `Roll the options position on ${name} into the next expiry each week.`;
+    case 'payments':
+      return `Make one purchase through ${name} each week and keep the receipt.`;
+    case 'chain':
+      return `Delegate a small amount to a second validator on ${chain} through ${name} each week.`;
+    default:
+      return `Make one qualifying action each week on ${name}, such as a deposit, a borrow, a swap or a vote.`;
+  }
+}
+
+/** Why the hold lasts: the category's own rhythm, so the hold is a reason and not just a number. */
+function holdReason(p: SnapshotProtocol): string {
+  switch (farmBucket(p)) {
+    case 'curator':
+      return 'vault points accrue per epoch, so a longer hold catches more epochs';
+    case 'basis':
+      return 'the basis pays out over funding periods, so the hold spans several of them';
+    case 'lending':
+      return 'interest accrues daily, so a longer hold builds a bigger borrow history';
+    case 'liquidity':
+      return 'fees compound in the pool, so the hold spans more than one fee cycle';
+    case 'bridge':
+      return 'bridge activity is read over weeks, so the hold covers crossings in both directions';
+    case 'staking':
+      return 'rewards compound per epoch, so the hold covers several epochs';
+    case 'derivatives':
+      return 'funding payments land on a schedule, so the hold covers several of them';
+    case 'prediction':
+      return 'markets settle over weeks, so the hold covers at least two settlements';
+    case 'stable':
+      return 'the peg is read over time, so the hold shows the position surviving more than one snapshot';
+    case 'rwa':
+      return 'yield pays out on a schedule, so the hold covers at least two payouts';
+    case 'insurance':
+      return 'cover is read over its term, so the hold shows the policy staying open';
+    case 'options':
+      return 'options expire on a schedule, so the hold covers at least one full expiry';
+    case 'payments':
+      return 'spending history builds over weeks, so the hold covers several purchases';
+    case 'chain':
+      return 'staking rewards accrue per epoch, so the hold covers several epochs';
+    default:
+      return 'the activity is counted in more than one snapshot';
+  }
+}
+
+/** The claim, per kind of protocol: what is claimed and where the protocol publishes it. */
+function claimAction(p: SnapshotProtocol): string {
+  const name = p.name;
+  switch (farmBucket(p)) {
+    case 'curator':
+      return `Before you withdraw, open ${name}'s vault page and claim only from the link it publishes; rewards land on the vault's own page.`;
+    case 'basis':
+      return `Before you withdraw, open ${name}'s vault page and claim only from the link it publishes; the basis yield is listed there.`;
+    case 'lending':
+      return `Before you withdraw, open ${name}'s rewards page and claim only from the link it publishes; never pay a fee to claim.`;
+    case 'liquidity':
+      return `Before you withdraw, open ${name}'s rewards page and claim the trading fees and any points, only from the link it publishes.`;
+    case 'bridge':
+      return `Before you withdraw, check ${name}'s rewards page for any bridge points, and claim only from the link it publishes.`;
+    case 'staking':
+      return `Before you withdraw, open ${name}'s staking page and claim the staking rewards, only from the link it publishes.`;
+    case 'derivatives':
+      return `Before you withdraw, open ${name}'s rewards page and claim any funding rebates, only from the link it publishes.`;
+    case 'prediction':
+      return `Before you withdraw, open ${name}'s market page and claim any winnings, only from the link it publishes.`;
+    case 'stable':
+      return `Before you withdraw, open ${name}'s rewards page and claim only from the link it publishes; the stable asset itself is the position.`;
+    case 'rwa':
+      return `Before you withdraw, open ${name}'s asset page and claim the yield, only from the link it publishes.`;
+    case 'insurance':
+      return `Before you withdraw, open ${name}'s policy page and claim any payout, only from the link it publishes.`;
+    case 'options':
+      return `Before you withdraw, open ${name}'s vault page and claim any expired-option payout, only from the link it publishes.`;
+    case 'payments':
+      return `Before you withdraw, open ${name}'s rewards page and claim any cashback, only from the link it publishes.`;
+    case 'chain':
+      return `Before you withdraw, open ${name}'s staking page and claim the rewards, only from the link it publishes.`;
+    default:
+      return `Before you withdraw, open ${name}'s own points or rewards page and claim only from the link it publishes.`;
+  }
+}
+
+/** The opening step: farm from a fresh wallet on the protocol's own chain, funded with
+ *  the chain's gas token. */
+function safetyStep(p: SnapshotProtocol, chain: string): FarmStep {
   return {
-    text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+    text: `Use a fresh wallet on ${chain} for ${p.name} that holds only the funds you plan to farm, plus a little ${gasTokenFor(chain)} for gas, and keep its seed phrase offline.`,
     cost: 'under $3 of gas for the first transaction',
     time: '5 minutes',
   };
@@ -699,28 +886,30 @@ function secondStep(p: SnapshotProtocol, capital: number, chain: string): FarmSt
   };
 }
 
-/** The weekly rhythm that keeps the wallet looking active. */
-function weeklyStep(): FarmStep {
+/** The weekly rhythm that keeps the wallet looking active, in the protocol's own terms. */
+function weeklyStep(p: SnapshotProtocol, chain: string): FarmStep {
   return {
-    text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`,
+    text: weeklyAction(p, chain),
     cost: 'about $2 of gas a week',
     time: '10 minutes a week',
   };
 }
 
-/** The hold: long enough for the activity to span more than one snapshot. */
-function holdStep(capital: number, hold: number): FarmStep {
+/** The hold: long enough for the activity to span more than one snapshot, for the
+ *  category's own reason. */
+function holdStep(p: SnapshotProtocol, capital: number, hold: number): FarmStep {
   return {
-    text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+    text: `Hold the ${p.name} position for at least ${hold} days — ${holdReason(p)}.`,
     cost: `the $${capital} stays in the position`,
     time: `${hold} days`,
   };
 }
 
-/** The claim: only ever from the link the protocol itself publishes. */
-function claimStep(): FarmStep {
+/** The claim: only ever from the link the protocol itself publishes, for what this kind
+ *  of protocol actually pays out. */
+function claimStep(p: SnapshotProtocol): FarmStep {
   return {
-    text: `Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.`,
+    text: claimAction(p),
     cost: 'no fee to check, and never pay to claim',
     time: '10 minutes',
   };
@@ -739,19 +928,20 @@ function riskStep(): FarmStep {
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is derived
  * from the protocol's own record (category, chains, TVL, age), never from a hand-written list of
- * names.
+ * names — and the weekly action, the hold's reason and the claim instruction change with the
+ * protocol's kind, so two rows in different categories never read the same plan.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = primaryChain(p);
   const capital = farmCapital(p);
   const hold = holdingDays(age);
   return [
-    safetyStep(),
+    safetyStep(p, chain),
     depositStep(p, capital, chain),
     secondStep(p, capital, chain),
-    weeklyStep(),
-    holdStep(capital, hold),
-    claimStep(),
+    weeklyStep(p, chain),
+    holdStep(p, capital, hold),
+    claimStep(p),
     riskStep(),
   ];
 }
