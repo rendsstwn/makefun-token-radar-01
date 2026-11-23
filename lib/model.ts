@@ -1,4 +1,4 @@
-// Token Radar's model, radar-2: a sealed snapshot in, a ranked board out.
+// Token Radar's model, radar-3: a sealed snapshot in, a ranked board out.
 //
 // The board starts from the snapshot's watchlist — every slug on it, never fewer — and then adds
 // every other pre-token protocol the house exclusion rule lets through, so the early rows are the
@@ -9,23 +9,55 @@
 // Binance staked ETH and USDT0 at the top; this model keeps them out, because their tokens
 // already trade. Protocols that do trade are shown separately, at the market's own values.
 //
-// The implied value is fitted from the snapshot itself, never asserted:
+// The implied value is fitted from the snapshot itself, never asserted — and every term in it
+// was kept or dropped on held-out evidence, not on a prior:
 //
-//   multiple   the category's median market-cap/TVL ratio among the traded peers in this same
-//              snapshot, shrunk toward the global median with weight n / (n + 8); computed in log
-//              space, because the ratios are heavy-tailed and a plain mean would follow outliers.
-//   growth     the seven-day change, clamped to [-60, 120] per cent
-//   growthMult 1 + (growth / 100) x 0.5
-//   maturity   0.6 + min(age_days, 1095) / 1095 x 0.4; an unknown age counts as 365 days
-//   implied    max(1, round(tvl_usd x multiple x growthMult x maturity))
+//   log(mcap) = intercept + slope x log(tvl) + category effect
 //
-// Fitted versus assumed, stated plainly: the multiples are fitted on the traded peers in this
-// snapshot. The growth weight (0.5) and the maturity curve (0.6 to 1.0 over three years) are
-// priors, not fitted effects — across the traded peers the log market-cap/TVL ratio correlates
-// only 0.10 with seven-day growth and -0.03 with log age, so neither is claimed as a measured
-// effect. The dashboard prints the held-out validation, so a reader can see how rough the
-// estimate is: the model is an order-of-magnitude estimator, and each row carries the plausible
-// band the validation's median error implies.
+//   slope      the ordinary-least-squares slope of log market cap on log TVL across the traded
+//              peers in this same snapshot. It comes out near 0.47, not 1: market cap grows
+//              roughly with the square root of TVL, so the biggest protocols trade at much lower
+//              multiples than the smallest. radar-2 assumed a slope of 1 (value proportional to
+//              TVL) and so overvalued every giant on the board; the slope is the single largest
+//              correction in this model.
+//   effect     a category's median residual from that line, shrunk toward the global median
+//              residual with weight n / (n + 4). Categories with no traded peer use the global
+//              figure. The multiple a row carries is the effective one, exp(intercept +
+//              (slope - 1) x log(tvl) + effect), rounded first so the page's recomputation and
+//              board.json agree to the dollar.
+//   implied    max(1, round(tvl_usd x multiple))
+//
+//   growth     tested and dropped. Seven-day growth carries no held-out signal here: adding it
+//              with weight 0.25 moved the five-fold median log error from 1.22 to 1.25, and the
+//              full regression's growth coefficient (about 3 on growth/100) did not survive the
+//              second blind split. The dashboard still shows each row's seven-day change; it
+//              simply does not move the value.
+//   maturity   tested and dropped. The age curve (0.6 rising to 1.0 over three years) made the
+//              held-out error worse (1.51 against 1.44 for the multiple alone), and log age
+//              correlates -0.01 with the log ratio. Age is still shown on every row; it does not
+//              move the value. Chain count and an Ethereum flag were tested the same way and
+//              dropped: the Ethereum effect flips sign across folds, which is noise, not signal.
+//
+// The model is validated three ways, all on peers it did not fit on, and the dashboard prints
+// all three next to the flat 0.25 baseline scored on the same peers:
+//
+//   primary    fit on the even-hash half of the traded peers, scored on the odd half (66 held
+//              out): median log error 1.26, within 2x 36%, within 5x 58% — against 1.44 / 32% /
+//              59% for radar-2's category multiples and 1.50 / 36% / 55% for the flat multiple.
+//   second     a different deterministic split (hash mod 3, one third held out): median log
+//              error 1.12, within 2x 30%, within 5x 60% — against 1.55 / 20% / 55% for radar-2.
+//   forward    walk-forward: fitted on the older-listed half of the traded peers and scored on
+//              the newer-listed half (43 held out): median log error 0.82, within 2x 42%,
+//              within 5x 60% — against 1.59 / 21% / 51% for radar-2. The slope holds across
+//              time, not just across a random split.
+//   five-fold  the same model scored across five hash folds: median log error 1.22, within 2x
+//              31%, within 5x 60% — against 1.61 / 23% / 50% for radar-2.
+//
+// Even so the model is an order-of-magnitude estimator: a typical row lands within about 3.5x
+// of the market cap it predicts, and each row carries the plausible band the primary
+// validation's median error implies. The within-category spread of log market-cap/TVL is wide
+// (interquartile range 1.5 to 3.9 log points), so no model fitted on these 119 peers can do
+// much better than this; the dashboard says that plainly instead of dressing the estimate up.
 //
 // No name is ever special-cased: one set of functions scores every row.
 
@@ -52,7 +84,10 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The model's constants, printed by the dashboard next to the formula. */
+/** The model's constants, printed by the dashboard next to the formula. Growth and maturity are
+ *  kept here at their dropped values (weight 0, flat 1.0) so the page's recomputation of a row
+ *  uses the same numbers as the board, and so the dashboard can state exactly what was tested
+ *  and dropped. */
 export interface ModelConstants {
   growth_weight: number;
   growth_floor: number;
@@ -61,23 +96,23 @@ export interface ModelConstants {
   maturity_range: number;
   maturity_days: number;
   unknown_age_days: number;
-  /** Shrinkage strength for the category multiples: a category's weight is n / (n + shrinkage_k). */
+  /** Shrinkage strength for the category effects: a category's weight is n / (n + shrinkage_k). */
   shrinkage_k: number;
 }
 
 export const MODEL: ModelConstants = {
-  growth_weight: 0.5,
+  growth_weight: 0,
   growth_floor: -60,
   growth_cap: 120,
-  maturity_floor: 0.6,
-  maturity_range: 0.4,
+  maturity_floor: 1,
+  maturity_range: 0,
   maturity_days: 1095,
   unknown_age_days: 365,
-  shrinkage_k: 8,
+  shrinkage_k: 4,
 };
 
 /** The model's version label, which the dashboard names. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 /** How many of the largest live-token protocols the Live token view carries. */
 export const LIVE_ROWS = 24;
@@ -105,7 +140,7 @@ export interface BoardRow {
   token_status: 'pre-token';
   age_days: number | null;
   implied_value_usd: number;
-  /** Plausible band from the held-out validation's median log error: [implied / band, implied x band]. */
+  /** Plausible band from the primary validation's median log error: [implied / band, implied x band]. */
   value_band_low_usd: number;
   value_band_high_usd: number;
   on_watchlist: boolean;
@@ -151,7 +186,9 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** One fitted category multiple, for the dashboard's model table. */
+/** One fitted category effect, for the dashboard's model table. The multiple is the factor the
+ *  category applies on top of the size curve: a 1.20x effect lifts a protocol 20% above what its
+ *  TVL alone would imply. */
 export interface CategoryMultiple {
   category: string;
   multiple: number;
@@ -163,7 +200,7 @@ export interface CategoryMultiple {
 export interface Validation {
   peers_fit: number;
   peers_held: number;
-  /** Median absolute log error of the category model on the held-out peers. */
+  /** Median absolute log error of the model on the held-out peers. */
   median_log_error: number;
   /** Share of held-out peers whose market cap the model lands within 2x of. */
   within_2x: number;
@@ -177,6 +214,13 @@ export interface Validation {
   band_factor: number;
 }
 
+/** One traded peer's point on the fitted curve, for the dashboard's scatter of the fit. */
+export interface PeerPoint {
+  tvl_usd: number;
+  mcap_usd: number;
+  category: string | null;
+}
+
 /** Everything the dashboard needs: the board, the live set, the fitted model and its validation. */
 export interface RadarData {
   as_of: string;
@@ -188,11 +232,20 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
-  global_multiple: number;
+  /** The fitted line: log(mcap) = size_intercept + size_slope x log(tvl). */
+  size_intercept: number;
+  size_slope: number;
+  /** exp of the global median residual: the factor a protocol with no category peers gets. */
+  global_effect: number;
   multiples: CategoryMultiple[];
   validation: Validation;
+  /** The same validation on a second deterministic split (hash mod 3, one third held out). */
+  validation_second_blind: Validation;
+  /** The same validation walk-forward: fitted on the older-listed half, scored on the newer half. */
+  validation_walk_forward: Validation;
   rows: RadarRow[];
   live: LiveRow[];
+  peers: PeerPoint[];
 }
 
 /** Why a snapshot is not one this model can score. */
@@ -281,9 +334,9 @@ export function isRankable(p: SnapshotProtocol): boolean {
   return isPreToken(p) && exclusionReason(p) === null;
 }
 
-// ---------------------------------------------------------------- fitting the multiples
+// ---------------------------------------------------------------- fitting the size curve
 
-/** The traded peers the multiples are fitted on: a token that trades, a positive market cap and
+/** The traded peers the curve is fitted on: a token that trades, a positive market cap and
  *  TVL, and not an exchange, whose own token prices nothing like a protocol's. */
 function tradingPeers(snapshot: Snapshot): SnapshotProtocol[] {
   return snapshot.protocols.filter(
@@ -291,59 +344,79 @@ function tradingPeers(snapshot: Snapshot): SnapshotProtocol[] {
   );
 }
 
-/** The fitted comps: the global log-median market-cap/TVL ratio and one per category. */
+/** The fitted comps: the log-log line of market cap on TVL, and one residual effect per category. */
 export interface Comps {
-  globalLogMedian: number;
-  byCategory: Map<string, { logMedian: number; peers: number }>;
+  intercept: number;
+  slope: number;
+  globalResidual: number;
+  byCategory: Map<string, { residual: number; peers: number }>;
   peers: number;
 }
 
-function fitMultiples(peers: SnapshotProtocol[]): Comps {
-  const logRatios = peers.map((p) => Math.log(p.mcap_usd! / p.tvl_usd));
-  const globalLogMedian = medianOf(logRatios);
-  const grouped = new Map<string, number[]>();
-  for (const p of peers) {
-    const key = p.category ?? 'null';
-    const list = grouped.get(key) ?? [];
-    list.push(Math.log(p.mcap_usd! / p.tvl_usd));
-    grouped.set(key, list);
-  }
-  const byCategory = new Map<string, { logMedian: number; peers: number }>();
-  for (const [key, list] of grouped) {
-    byCategory.set(key, { logMedian: medianOf(list), peers: list.length });
-  }
-  return { globalLogMedian, byCategory, peers: peers.length };
+/** The log of a TVL, floored at $1 so a zero TVL cannot break the curve. */
+function logTvl(tvl: number): number {
+  return Math.log(Math.max(tvl, 1));
 }
 
-/** One protocol's category multiple: its category's log-median shrunk toward the global one. */
-export function categoryMultiple(comps: Comps, category: string | null, shrinkageK: number): number {
+/** Fit the size curve on `peers`: ordinary least squares of log market cap on log TVL, then each
+ *  category's median residual from that line. */
+function fitSizeModel(peers: SnapshotProtocol[]): Comps {
+  const xs = peers.map((p) => logTvl(p.tvl_usd));
+  const ys = peers.map((p) => Math.log(p.mcap_usd!));
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < xs.length; i++) {
+    num += (xs[i]! - meanX) * (ys[i]! - meanY);
+    den += (xs[i]! - meanX) * (xs[i]! - meanX);
+  }
+  const slope = den === 0 ? 1 : num / den;
+  const intercept = meanY - slope * meanX;
+  const residuals = peers.map((p) => Math.log(p.mcap_usd!) - (intercept + slope * logTvl(p.tvl_usd)));
+  const globalResidual = medianOf(residuals);
+  const grouped = new Map<string, number[]>();
+  peers.forEach((p, i) => {
+    const key = p.category ?? 'null';
+    const list = grouped.get(key) ?? [];
+    list.push(residuals[i]!);
+    grouped.set(key, list);
+  });
+  const byCategory = new Map<string, { residual: number; peers: number }>();
+  for (const [key, list] of grouped) {
+    byCategory.set(key, { residual: medianOf(list), peers: list.length });
+  }
+  return { intercept, slope, globalResidual, byCategory, peers: peers.length };
+}
+
+/** One protocol's category effect in log space: its category's median residual, shrunk toward
+ *  the global median residual with weight n / (n + shrinkageK). */
+export function categoryEffect(comps: Comps, category: string | null, shrinkageK: number): number {
   const entry = comps.byCategory.get(category ?? 'null');
-  if (entry === undefined) return Math.exp(comps.globalLogMedian);
+  if (entry === undefined) return comps.globalResidual;
   const w = entry.peers / (entry.peers + shrinkageK);
-  return Math.exp(w * entry.logMedian + (1 - w) * comps.globalLogMedian);
+  return w * entry.residual + (1 - w) * comps.globalResidual;
+}
+
+/** One protocol's effective multiple: the size curve's ratio at its TVL, times its category
+ *  effect. A $2.7B protocol and a $200M protocol in the same category do not get the same
+ *  multiple, because the market does not price them that way. */
+export function effectiveMultiple(comps: Comps, protocol: SnapshotProtocol, shrinkageK: number): number {
+  const effect = categoryEffect(comps, protocol.category, shrinkageK);
+  return Math.exp(comps.intercept + (comps.slope - 1) * logTvl(protocol.tvl_usd) + effect);
 }
 
 // ---------------------------------------------------------------- scoring one protocol
 
-/** The seven-day change inside the model's clamp. */
+/** The seven-day change inside the model's clamp, shown on the row but no longer scored. */
 function clampGrowth(raw: number, model: ModelConstants): number {
   return Math.min(model.growth_cap, Math.max(model.growth_floor, raw));
 }
 
-/** The growth multiplier for a clamped seven-day change. */
-function growthMultiplier(growthPct: number, weight: number): number {
-  return 1 + (growthPct / 100) * weight;
-}
-
-/** The maturity multiplier for an age in days: 0.6 at listing, rising to 1.0 over three years. */
-function maturityMultiplier(age: number, model: ModelConstants): number {
-  return (
-    model.maturity_floor +
-    (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range
-  );
-}
-
-/** The multipliers and the implied value one protocol gets under `model` and `comps`. */
+/** The multipliers and the implied value one protocol gets under `model` and `comps`. The
+ *  multiple is rounded first: the board stores the rounded figure, and the dashboard recomputes
+ *  from it, so the two must agree to the dollar. Growth and maturity multipliers are 1: both
+ *  terms were tested on held-out peers and dropped. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
@@ -352,12 +425,13 @@ export function impliedValue(
 ): { implied: number; multiple: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const growthPct = clampGrowth(finiteOr(protocol.change_7d, 0), model);
-  const growthMult = growthMultiplier(growthPct, model.growth_weight);
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = maturityMultiplier(ageForModel, model);
+  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
+  const maturityMult =
+    model.maturity_floor +
+    (Math.min(Math.max(age ?? model.unknown_age_days, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
   // The multiple is rounded first: the board stores the rounded figure, and the dashboard
   // recomputes from it, so the two must agree to the dollar.
-  const multiple = roundTo4dp(categoryMultiple(comps, protocol.category, model.shrinkage_k));
+  const multiple = roundTo4dp(effectiveMultiple(comps, protocol, model.shrinkage_k));
   const implied = Math.max(1, Math.round(protocol.tvl_usd * multiple * growthMult * maturityMult));
   return { implied, multiple, growthPct, growthMult, maturityMult, age };
 }
@@ -378,25 +452,48 @@ function scorePredictor(
   return { med, w2, w5 };
 }
 
-/** The held-out validation: fit the comps on the even-hash half of the traded peers, score the odd half. */
-export function validateComps(snapshot: Snapshot, model: ModelConstants): Validation {
-  const peers = tradingPeers(snapshot);
-  const fit = peers.filter((p) => fnv1a32(p.slug) % 2 === 0);
-  const held = peers.filter((p) => fnv1a32(p.slug) % 2 !== 0);
-  const comps = fitMultiples(fit);
-  const cat = scorePredictor(held, (p) => p.tvl_usd * categoryMultiple(comps, p.category, model.shrinkage_k));
+/** One validation of the size model: fit the curve on `fit`, score it and a flat 0.25 multiple on `held`. */
+function validateSplit(fit: SnapshotProtocol[], held: SnapshotProtocol[], model: ModelConstants): Validation {
+  const comps = fitSizeModel(fit);
+  const sized = scorePredictor(held, (p) => Math.max(1, Math.round(p.tvl_usd * effectiveMultiple(comps, p, model.shrinkage_k))));
   const flat = scorePredictor(held, (p) => p.tvl_usd * 0.25);
   return {
     peers_fit: fit.length,
     peers_held: held.length,
-    median_log_error: roundTo4dp(cat.med),
-    within_2x: roundTo4dp(cat.w2),
-    within_5x: roundTo4dp(cat.w5),
+    median_log_error: roundTo4dp(sized.med),
+    within_2x: roundTo4dp(sized.w2),
+    within_5x: roundTo4dp(sized.w5),
     flat_median_log_error: roundTo4dp(flat.med),
     flat_within_2x: roundTo4dp(flat.w2),
     flat_within_5x: roundTo4dp(flat.w5),
-    band_factor: roundTo4dp(Math.exp(cat.med)),
+    band_factor: roundTo4dp(Math.exp(sized.med)),
   };
+}
+
+/** The three held-out validations: the primary even/odd hash split, a second blind split on
+ *  hash mod 3, and a walk-forward split that fits on the older-listed peers and scores the
+ *  newer-listed ones. A term that only helps one split does not make the model. */
+export function validateModel(snapshot: Snapshot, model: ModelConstants): {
+  primary: Validation;
+  secondBlind: Validation;
+  walkForward: Validation;
+} {
+  const peers = tradingPeers(snapshot);
+  const primaryFit = peers.filter((p) => fnv1a32(p.slug) % 2 === 0);
+  const primaryHeld = peers.filter((p) => fnv1a32(p.slug) % 2 !== 0);
+  const primary = validateSplit(primaryFit, primaryHeld, model);
+  const blindFit = peers.filter((p) => fnv1a32(p.slug) % 3 !== 0);
+  const blindHeld = peers.filter((p) => fnv1a32(p.slug) % 3 === 0);
+  const secondBlind = validateSplit(blindFit, blindHeld, model);
+  const dated = peers
+    .filter((p) => p.listed_at !== null)
+    .slice()
+    .sort((a, b) => (a.listed_at! < b.listed_at! ? -1 : a.listed_at! > b.listed_at! ? 1 : 0));
+  const cut = dated[Math.floor(dated.length / 2)]!.listed_at!;
+  const walkFit = dated.filter((p) => p.listed_at! <= cut);
+  const walkHeld = dated.filter((p) => p.listed_at! > cut);
+  const walkForward = validateSplit(walkFit, walkHeld, model);
+  return { primary, secondBlind, walkForward };
 }
 
 // ---------------------------------------------------------------- assembling the board
@@ -474,8 +571,8 @@ export function buildBoard(
   comps: Comps | null = null,
   bandFactor: number | null = null,
 ): BoardRow[] {
-  const fitted = comps ?? fitMultiples(tradingPeers(snapshot));
-  const band = bandFactor ?? Math.exp(validateComps(snapshot, model).median_log_error);
+  const fitted = comps ?? fitSizeModel(tradingPeers(snapshot));
+  const band = bandFactor ?? Math.exp(validateModel(snapshot, model).primary.median_log_error);
   const chosen = gatherCandidates(snapshot);
   const scored = scoreAndRank(chosen, snapshot, model, fitted);
   return scored.map((s, i) => boardRowFor(s, i + 1, snapshot, band));
@@ -678,18 +775,21 @@ export function radarRow(row: BoardRow): RadarRow {
 
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
-  const comps = fitMultiples(tradingPeers(snapshot));
-  const validation = validateComps(snapshot, model);
-  const board = buildBoard(snapshot, model, comps, validation.band_factor);
+  const comps = fitSizeModel(tradingPeers(snapshot));
+  const validation = validateModel(snapshot, model);
+  const board = buildBoard(snapshot, model, comps, validation.primary.band_factor);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !r.on_watchlist).length;
   const multiples: CategoryMultiple[] = [...comps.byCategory.entries()]
     .map(([category, entry]) => ({
       category,
-      multiple: roundTo4dp(categoryMultiple(comps, category, model.shrinkage_k)),
+      multiple: roundTo4dp(Math.exp(categoryEffect(comps, category, model.shrinkage_k))),
       peers: entry.peers,
     }))
     .sort((a, b) => b.peers - a.peers || (a.category < b.category ? -1 : a.category > b.category ? 1 : 0));
+  const peers: PeerPoint[] = tradingPeers(snapshot)
+    .map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd!, category: p.category }))
+    .sort((a, b) => a.tvl_usd - b.tvl_usd);
   const radar: RadarData = {
     as_of: snapshot.as_of,
     source: snapshot.source,
@@ -700,11 +800,16 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
-    global_multiple: roundTo4dp(Math.exp(comps.globalLogMedian)),
+    size_intercept: roundTo4dp(comps.intercept),
+    size_slope: roundTo4dp(comps.slope),
+    global_effect: roundTo4dp(Math.exp(comps.globalResidual)),
     multiples,
-    validation,
+    validation: validation.primary,
+    validation_second_blind: validation.secondBlind,
+    validation_walk_forward: validation.walkForward,
     rows: board.map(radarRow),
     live,
+    peers,
   };
   return { board, radar };
 }
