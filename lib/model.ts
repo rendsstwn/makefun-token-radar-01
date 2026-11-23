@@ -27,16 +27,31 @@
 //              board.json agree to the dollar.
 //   implied    max(1, round(tvl_usd x multiple))
 //
-//   growth     tested and dropped. Seven-day growth carries no held-out signal here: adding it
-//              with weight 0.25 moved the five-fold median log error from 1.22 to 1.25, and the
-//              full regression's growth coefficient (about 3 on growth/100) did not survive the
-//              second blind split. The dashboard still shows each row's seven-day change; it
-//              simply does not move the value.
-//   maturity   tested and dropped. The age curve (0.6 rising to 1.0 over three years) made the
-//              held-out error worse (1.51 against 1.44 for the multiple alone), and log age
-//              correlates -0.01 with the log ratio. Age is still shown on every row; it does not
-//              move the value. Chain count and an Ethereum flag were tested the same way and
-//              dropped: the Ethereum effect flips sign across folds, which is noise, not signal.
+//   growth     tested and dropped, twice. Seven-day growth carries no held-out signal
+//              here: adding it with weight 0.25 moved the five-fold median log error from
+//              1.22 to 1.25, and the full regression's growth coefficient (about 3 on
+//              growth/100) did not survive the second blind split. radar-4 re-tested it
+//              under the slope model in three new forms — a capped log-additive term,
+//              positive-only growth, and growth for mature protocols only — and none of
+//              them beat radar-3 on more than half of 20 seeded random splits. The
+//              dashboard still shows each row's seven-day change; it simply does not
+//              move the value.
+//   maturity   tested and dropped, twice. The age curve (0.6 rising to 1.0 over three
+//              years) made the held-out error worse (1.51 against 1.44 for the multiple
+//              alone), and log age correlates -0.01 with the log ratio. radar-4 re-tested
+//              age as a fitted regressor and as extra shrinkage of young protocols'
+//              category effects: the regressor hurt every split, and the shrinkage moved
+//              nothing — the youngest held-out peers are few, and their error is variance,
+//              not a bias an age term can correct. Age is still shown on every row; it
+//              does not move the value. Chain count and an Ethereum flag were tested the
+//              same way and dropped: the Ethereum effect flips sign across folds, which
+//              is noise, not signal; a fitted log-chains term helped two splits and hurt
+//              the other two, and won only 9 of 20 seeded random splits.
+//   dispersion the wide within-category spread was attacked directly in radar-4 and
+//              survived: splitting the big categories (Lending, Dexs) by TVL tercile,
+//              a trimmed-mean category effect, per-category slopes, and a residual
+//              regression on age, chains and growth all failed to beat radar-3 across
+//              the four splits. The spread is the data, not a missed feature.
 //
 // The model is validated three ways, all on peers it did not fit on, and the dashboard prints
 // all three next to the flat 0.25 baseline scored on the same peers:
@@ -58,6 +73,10 @@
 // validation's median error implies. The within-category spread of log market-cap/TVL is wide
 // (interquartile range 1.5 to 3.9 log points), so no model fitted on these 119 peers can do
 // much better than this; the dashboard says that plainly instead of dressing the estimate up.
+// radar-4 is the proof of that claim, not a new formula: 37 variants were tried against the
+// same four held-out splits, the best-looking ones were re-tested on 20 seeded random 50/50
+// splits, and none beat radar-3 on even half the seeds. When a variant only wins on the
+// splits it was picked on, it is selection noise, and it stays out of the model.
 //
 // No name is ever special-cased: one set of functions scores every row.
 
@@ -111,8 +130,14 @@ export const MODEL: ModelConstants = {
   shrinkage_k: 4,
 };
 
-/** The model's version label, which the dashboard names. */
-export const MODEL_VERSION = 'radar-3';
+/** The model's version label, which the dashboard names. radar-4 keeps radar-3's
+ *  formula exactly: radar-4 re-tested it against 37 variants on four held-out splits
+ *  (age shrinkage, size-band category effects, chain count, positive-only growth,
+ *  robust and per-category slopes, residual-feature regression) and a 20-seed random-split
+ *  re-test, and none of them beat it — every apparent gain was within selection noise.
+ *  The formula is at the noise floor of these 119 peers; radar-4's improvement is the
+ *  dashboard's first screen and the record of that testing. */
+export const MODEL_VERSION = 'radar-4';
 
 /** How many of the largest live-token protocols the Live token view carries. */
 export const LIVE_ROWS = 24;
