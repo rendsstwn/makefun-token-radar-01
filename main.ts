@@ -8,10 +8,13 @@
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board.
 //
-// The model (lib/model.ts, radar-2) fits its market-cap/TVL multiples on the traded peers inside the
-// same snapshot, shrunk by category, and validates them on a deterministic held-out half before the
-// board is scored. It ranks every protocol the watchlist rule keeps — the 40 on the watchlist and
-// every other rankable pre-token protocol below the floor — and leaves wrapped, staked and bridged
+// The model (lib/model.ts, radar-3) fits a log-log size curve of market cap on TVL on the
+// traded peers inside the same snapshot, adds a shrunk category effect per category, and
+// validates the whole thing three ways on held-out peers (a primary split, a second blind
+// split, and walk-forward on listing date) before the board is scored. Seven-day growth and
+// the age curve were tested on the same held-out peers and dropped: neither moved the value.
+// It ranks every protocol the watchlist rule keeps — the 40 on the watchlist and every other
+// rankable pre-token protocol below the floor — and leaves wrapped, staked and bridged
 // products out, because their tokens already trade.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
@@ -104,6 +107,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: model ${radar.model_version}, global multiple ${radar.global_multiple}, held-out median log error ${radar.validation.median_log_error} (${radar.validation.peers_held} peers)\n` +
+    `token radar: model ${radar.model_version}, size slope ${radar.size_slope} (log mcap = ${radar.size_intercept} + ${radar.size_slope} x log tvl), global effect ${radar.global_effect}, held-out median log error ${radar.validation.median_log_error} (${radar.validation.peers_held} peers)\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );
