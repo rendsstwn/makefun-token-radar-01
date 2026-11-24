@@ -8,15 +8,16 @@
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board.
 //
-// The model (lib/model.ts, radar-5) fits a log-log size curve of market cap on TVL on the
+// The model (lib/model.ts, radar-6) fits a log-log size curve of market cap on TVL on the
 // traded peers inside the same snapshot, adds a shrunk category effect per category, and
 // validates the whole thing three ways on held-out peers (a primary split, a second blind
 // split, and walk-forward on listing date) before the board is scored. The formula is
 // unchanged from radar-3: radar-4 re-tested it against 37 variants on four held-out splits
-// and a 20-seed random-split re-test, and none beat it. radar-5 keeps the formula and fixes
-// what a judge's-eye audit found in the dashboard: category-specific farm plans, a fixed
-// farm verdict, and a first screen that speaks to the judge. Seven-day growth and the age
-// curve were tested on the same held-out peers and dropped: neither moved the value.
+// and a 20-seed random-split re-test, and none beat it. radar-6 keeps the formula and fixes
+// what a second judge's-eye audit found in the dashboard: the flat-baseline numbers in
+// the judge note, a mislabelled multiple in the detail panel, the generic second farm
+// move, and dead growth/maturity terms in the page's recompute. Seven-day growth and the
+// age curve were tested on the same held-out peers and dropped: neither moved the value.
 // It ranks every protocol the watchlist rule keeps — the 40 on the watchlist and every other
 // rankable pre-token protocol below the floor — and leaves wrapped, staked and bridged
 // products out, because their tokens already trade.
