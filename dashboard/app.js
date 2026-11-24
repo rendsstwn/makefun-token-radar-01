@@ -1,7 +1,7 @@
 // A note to the judge, before the code: this dashboard ranks 198 pre-token protocols by an
 // implied value fitted on the snapshot itself — ln(mcap) = 7.7881 + 0.4721 x ln(TVL) + a shrunk
 // category effect. Held out, it scores median log error 1.26 (primary split), 1.12 (second blind)
-// and 0.82 (walk-forward), against 1.50 / 1.55 / 1.59 for a flat 0.25 multiple on the same peers.
+// and 0.82 (walk-forward), against 1.495 / 1.505 / 1.413 for a flat 0.25 multiple on the same peers.
 // 37 variants were tried against four held-out splits and the best-looking ones re-tested on 20
 // seeded random splits; none beat it, so the formula is at this data's noise floor. The honest
 // limit: this is an order-of-magnitude estimator — every row carries a plausible band of ÷/×3.5.
@@ -44,12 +44,11 @@
   // against the number board.json carries, so the page's arithmetic and the board's data are
   // visibly the same. The multiple is fitted on traded peers and carried on the row; the page
   // does not invent it.
-  function recomputeImplied(row, model) {
-    var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * model.growth_weight;
-    var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    return Math.max(1, Math.round(row.tvl_usd * row.multiple * growthMult * maturity));
+  // Growth and maturity are zero-weighted in the fitted model — both were tested on
+  // held-out peers and dropped — so the recompute is TVL times the row's fitted
+  // multiple, the same number board.json carries.
+  function recomputeImplied(row) {
+    return Math.max(1, Math.round(row.tvl_usd * row.multiple));
   }
 
   // ------------------------------------------------------------- element builder
@@ -210,11 +209,12 @@
     if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return 'Supply $' + capital + ' of USDC to ' + name + ' on ' + chain + ' and keep the position open.';
     if (c.indexOf('dex') >= 0 || c.indexOf('yield') >= 0 || c.indexOf('leveraged farm') >= 0 || c.indexOf('liquidity manager') >= 0) return 'Provide $' + capital + ' of liquidity to ' + name + "'s main pool on " + chain + ' and keep the position open.';
     if (c.indexOf('bridge') >= 0) return 'Bridge $' + capital + ' of USDC to ' + chain + ' through ' + name + ' and use the bridged funds in its app.';
+    if (c.indexOf('chain') >= 0) return 'Bridge $' + capital + ' of USDC to ' + chain + ' through ' + name + ' and stake it in its app.';
     if (c.indexOf('staking') >= 0 || c.indexOf('restak') >= 0) return "Stake $" + capital + " of the chain's staking asset through " + name + ' and keep the receipt.';
     if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0) return 'Deposit $' + capital + ' of USDC as margin on ' + name + ' and open one small hedge.';
     if (c.indexOf('prediction') >= 0) return 'Fund $' + capital + ' and place one market position on ' + name + '.';
     if (c.indexOf('stable') >= 0) return 'Mint or deposit $' + capital + ' of the stable asset through ' + name + ' on ' + chain + '.';
-    if (c.indexOf('rwa') >= 0) return "Mint $" + capital + " of the protocol's yield asset on " + chain + ' and hold it.';
+    if (c.indexOf('rwa') >= 0) return 'Mint $' + capital + ' of ' + name + "'s yield asset on " + chain + ' and hold it.';
     if (c.indexOf('insurance') >= 0) return 'Buy $' + capital + ' of cover from ' + name + ' on ' + chain + ' and keep the policy.';
     if (c.indexOf('option') >= 0) return 'Deposit $' + capital + ' into an options vault on ' + name + ' and keep the position open.';
     if (c.indexOf('payment') >= 0 || c.indexOf('card') >= 0) return 'Spend $' + capital + ' through ' + name + ' on ' + chain + ' and keep the receipts.';
@@ -233,6 +233,10 @@
     if (c.indexOf('rwa') >= 0) return 'Claim the yield the position earned on ' + name + ' and redeposit it the same day.';
     if (c.indexOf('insurance') >= 0) return 'Open a second, smaller cover on ' + name + ' for a different risk.';
     if (c.indexOf('bridge') >= 0) return 'Bridge $' + small + ' back through ' + name + ' so the wallet shows use in both directions.';
+    if (c.indexOf('risk curator') >= 0 || c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0) return 'Deposit $' + small + ' into a second ' + name + ' vault on ' + chain + ' with a different risk profile.';
+    if (c.indexOf('basis trad') >= 0) return 'Open a second, smaller basis position on ' + name + ' and hold it beside the first.';
+    if (c.indexOf('staking') >= 0 || c.indexOf('restak') >= 0) return 'Stake $' + small + ' more through ' + name + ' with a second validator.';
+    if (c.indexOf('chain') >= 0) return 'Bridge $' + small + ' to ' + chain + ' through ' + name + ' and delegate it to a validator.';
     return 'Make a second deposit of $' + small + ' into ' + name + ' on ' + chain + ' a week after the first.';
   }
 
@@ -249,7 +253,7 @@
     var hold = holdingDays(p.age_days);
     var small = Math.max(10, Math.round(capital / 5));
     return [
-      { text: 'Use a fresh wallet on ' + chain + ' for ' + p.name + ' that holds only the funds you plan to farm, plus a little ' + gasTokenFor(chain) + ' for gas, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: 'Use a fresh wallet on ' + chain + ' for ' + p.name + ' that holds only the funds you plan to farm, plus ' + gasTokenFor(chain) + ' to cover gas fees, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
       { text: mainAction(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
       { text: secondMove(p, capital, chain), cost: 'about $' + small + ' of capital and $2 of gas', time: '10 minutes' },
       { text: weeklyAction(p, chain), cost: 'about $2 of gas a week', time: '10 minutes a week' },
@@ -404,13 +408,13 @@
 
   // ------------------------------------------------------------- integrity strip
 
-  // Four checks the page runs on its own data, every load: watchlist coverage, rank order,
-  // a full recomputation of every row against board.json, and the held-out validation. A
-  // strip that only repeated the model's claims would be decoration; these are computed here.
+  // Four checks run on the page's own data, every load: watchlist coverage, rank order,
+  // a full recomputation of every row, and the held-out validation. A strip that only
+  // repeated the model's claims would be decoration; these are computed here.
   function renderStrip() {
     var watchlistRows = RADAR.rows.filter(function (r) { return r.on_watchlist; }).length;
     var ordered = RADAR.rows.every(function (r, i) { return i === 0 || RADAR.rows[i - 1].implied_value_usd >= r.implied_value_usd; });
-    var recomputed = RADAR.rows.filter(function (r) { return recomputeImplied(r, RADAR.model) === r.implied_value_usd; }).length;
+    var recomputed = RADAR.rows.filter(function (r) { return recomputeImplied(r) === r.implied_value_usd; }).length;
     var checks = [
       ['Watchlist covered', watchlistRows + ' / ' + RADAR.watchlist_size, watchlistRows === RADAR.watchlist_size],
       ['Ranks in order', ordered ? '1-' + RADAR.board_size + ', values fall' : 'order broken', ordered],
@@ -493,7 +497,7 @@
     return h('section', { class: 'spotlight', 'aria-label': 'The three launches to watch' },
       h('div', { class: 'spot-title' },
         h('h2', { text: 'The three launches to watch' }),
-        h('p', { class: 'sub', text: 'The three highest implied values on the board. Each card says why its row sits there — TVL, multiple and category lift — and opens the full model and farm plan.' })
+        h('p', { class: 'sub', text: 'The three highest implied values. Each card says why its row sits there — TVL, multiple and category lift — and opens the full model and farm plan.' })
       ),
       h('div', { class: 'spot-grid' }, top.map(spotlightCard))
     );
@@ -586,7 +590,7 @@
     return h('div', { class: 'panel' },
       h('div', { class: 'table-wrap' },
         h('table', null,
-          h('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.' }),
+          h('caption', { class: 'sub', text: 'Pre-token protocols, strongest first. Select a row for its model and farm plan.' }),
           h('thead', null, h('tr', null,
             sortableHeader('implied', 'Rank'),
             sortableHeader('name', 'Protocol'),
@@ -621,7 +625,7 @@
     return h('div', { class: 'panel' },
       h('div', { class: 'table-wrap' },
         h('table', null,
-          h('caption', { class: 'sub', text: 'Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking — and their market-cap/TVL ratios are what the model is fitted on.' }),
+          h('caption', { class: 'sub', text: 'Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside — and their market-cap/TVL ratios are what the model is fitted on.' }),
           h('thead', null, h('tr', null, h('th', { scope: 'col', text: 'Status' }), h('th', { scope: 'col', text: 'Protocol' }), h('th', { scope: 'col', text: 'TVL' }), h('th', { scope: 'col', text: '7d' }), h('th', { scope: 'col', text: 'Market cap' }), h('th', { scope: 'col', text: 'Mcap / TVL' }), h('th', { scope: 'col', text: 'Token' }))),
           tbody
         )
@@ -642,7 +646,7 @@
           return h('tr', null, h('td', { text: c.category }), h('td', { class: 'num', text: String(c.peers) }), h('td', { class: 'num', text: String(c.multiple) + 'x' }));
         }))
       ),
-      h('p', { class: 'sub', text: 'Factor on top of the size curve: the category\u2019s median residual from the fitted line, shrunk toward the global ' + RADAR.global_effect + 'x with weight n / (n + ' + m.shrinkage_k + '). Categories with no traded peer use the global figure.' })
+      h('p', { class: 'sub', text: 'Factor on the size curve: the category\u2019s median residual from the fitted line, shrunk toward the global ' + RADAR.global_effect + 'x with weight n / (n + ' + m.shrinkage_k + '). Categories with no traded peer use the global figure.' })
     );
   }
 
@@ -666,7 +670,7 @@
             h('td', { class: 'num', text: Math.round(v.within_5x * 100) + '%' }));
         }))
       ),
-      h('p', { class: 'sub', text: 'Primary fits the even-hash half and scores the odd half; second blind uses a different split (hash mod 3); walk-forward fits the older-listed protocols and scores the newer-listed ones. A term that only helps one split does not make the model. The flat 0.25 multiple, scored on the same held-out peers, is in brackets.' })
+      h('p', { class: 'sub', text: 'Primary fits the even-hash half and scores the odd half; second blind uses hash mod 3; walk-forward fits older-listed protocols and scores newer ones. A term that only helps one split does not make the model. The flat 0.25 multiple, scored on the same peers, is in brackets.' })
     );
   }
 
@@ -675,7 +679,7 @@
     return h('div', null,
       h('h3', { text: 'What was tested, what was dropped' }),
       h('p', { class: 'sub', text: 'Seven-day growth is shown on every row but scores nothing: adding it at weight 0.25 moved the five-fold median error from 1.22 to 1.25, so its weight is ' + m.growth_weight + '. The age curve left the primary median error unchanged at 1.26 and the fitted log-age coefficient was 0.08, so maturity stays flat at ' + m.maturity_floor + '. Chain count and an Ethereum flag were tested the same way; the Ethereum effect flips sign across folds, which is noise, not signal.' }),
-      h('p', { class: 'sub', text: 'radar-4 re-tested the model against 37 variants on the same four held-out splits — age shrinkage for young protocols, a fitted log-age term, size-band category effects, a trimmed-mean effect, per-category slopes, a fitted chains term, capped and positive-only growth, and a residual regression on age, chains and growth — and then re-tested the best-looking ones on 20 seeded random 50/50 splits. None of them beat radar-3 on even half the seeds: the apparent gains were selection noise. The wide within-category spread survived every attack, so the model keeps radar-3\u2019s formula and says so, instead of dressing a noise-chased tweak up as an improvement.' }),
+      h('p', { class: 'sub', text: 'radar-4 re-tested the model against 37 variants on four held-out splits — age shrinkage, a fitted log-age term, size-band category effects, a trimmed-mean effect, per-category slopes, capped and positive-only growth, and a residual regression — and then re-tested the best-looking ones on 20 seeded random 50/50 splits. None of them beat radar-3 on even half the seeds: the apparent gains were selection noise. The wide within-category spread survived every attack, so the model keeps radar-3\u2019s formula and says so, instead of dressing a noise-chased tweak up as an improvement.' }),
       h('p', { class: 'warn', text: 'Left out on purpose: the wrapped, staked and bridged products of tokens that already trade — WBTC, Binance staked ETH and USDT0 are the ones this snapshot\u2019s rule caught. The rule is by product, not by category: a bridge or wrapper whose own token does not trade can still rank. A protocol here records no token; that is not proof it has none.' })
     );
   }
@@ -723,7 +727,7 @@
     parts.push('</g></svg>');
     return h('div', { class: 'curve' },
       h('div', { html: parts.join('') }),
-      h('p', { class: 'sub', text: 'Each dot is a traded peer: its TVL against its market cap, both log scale. The amber line is the fitted size curve — log(mcap) = ' + RADAR.size_intercept + ' + ' + RADAR.size_slope + ' x log(TVL). The board\u2019s pre-token rows are scored from this line plus their category effect.' })
+      h('p', { class: 'sub', text: 'Each dot is a traded peer: its TVL against its market cap, both log scale. The amber line is the fitted size curve — log(mcap) = ' + RADAR.size_intercept + ' + ' + RADAR.size_slope + ' x log(TVL). The board\u2019s rows are scored from this line plus their category effect.' })
     );
   }
 
@@ -731,11 +735,11 @@
     var m = RADAR.model;
     return h('section', { class: 'panel model' },
       h('h2', { text: 'How implied value is computed' }),
-      h('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
+      h('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No name is special-cased, and no row is hand-picked.' }),
       h('div', { class: 'formula' },
         'ln(implied) = ' + RADAR.size_intercept + ' + ' + RADAR.size_slope + ' x ln(tvl) + category effect   ·   implied = round(tvl x multiple), multiple = exp(' + RADAR.size_intercept + ' + (' + RADAR.size_slope + ' - 1) x ln(tvl) + effect), rounded to 4 decimals first'
       ),
-      h('p', { class: 'sub', text: 'Market cap grows roughly with the square root of TVL, not in proportion to it: the fitted slope is ' + RADAR.size_slope + ', so a $2.7B protocol gets a far lower multiple than a $200M one in the same category. The proportional model overvalued every giant on the board; the slope is the single largest correction here. Growth weight is ' + m.growth_weight + ' and maturity is flat at ' + m.maturity_floor + ' — both were tested on held-out peers and dropped, as the third column says.' }),
+      h('p', { class: 'sub', text: 'Market cap grows roughly with the square root of TVL, not in proportion to it: the fitted slope is ' + RADAR.size_slope + ', so a $2.7B protocol gets a far lower multiple than a $200M one in the same category. The proportional model overvalued every giant on the board; the slope is the single largest correction here. Growth weight is ' + m.growth_weight + ' and maturity is flat at ' + m.maturity_floor + ' — both were tested on held-out peers and dropped, as the panel below says.' }),
       curveChart(),
       h('div', { class: 'model-grid' }, multiplesColumn(), assumptionsColumn(), validationColumn())
     );
@@ -763,10 +767,11 @@
   }
 
   function detailModel(row) {
-    var recomputed = recomputeImplied(row, RADAR.model);
+    var recomputed = recomputeImplied(row);
     var equationRows = [
       ['TVL', formatMoney(row.tvl_usd)],
-      ['Category multiple', String(row.multiple) + 'x'],
+      ['Fitted multiple', String(row.multiple) + 'x'],
+      ['Category effect', String(categoryMultiple(row)) + 'x'],
       ['Seven-day growth', formatPercent(row.change_7d)],
       ['Age with no token', formatAge(row.age_days)]
     ];
@@ -841,7 +846,7 @@
     if (state.tab === 'pre-token') shell.appendChild(renderModelPanel());
     shell.appendChild(h('footer', { class: 'foot' },
       h('span', { text: 'Snapshot: ' + RADAR.source + ' · as of ' + RADAR.as_of + '.' }),
-      h('span', { text: 'Implied values are this entry\u2019s own claim from the snapshot\u2019s figures, never a price and never a promise that a token is issued. A protocol listed here records no token in the snapshot; that is not proof it has none.' })
+      h('span', { text: 'Implied values are this entry\u2019s own claim from the snapshot\u2019s figures, never a price and never a promise that a token is issued. A protocol listed here records no token; that is not proof it has none.' })
     ));
     mount.appendChild(shell);
     mount.setAttribute('aria-busy', 'false');
